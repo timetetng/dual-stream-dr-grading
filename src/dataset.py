@@ -9,7 +9,6 @@ from sklearn.model_selection import StratifiedKFold
 class APTOSDataset(Dataset):
     def __init__(self, dataframe, img_dir, transform=None, is_train=True):
         self.data = dataframe.reset_index(drop=True)
-        # 这里的 img_dir 之后在 main.py 里要传 'data/processed/train_images'
         self.img_dir = img_dir 
         self.transform = transform
         self.is_train = is_train
@@ -44,8 +43,9 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
     train_df = df.iloc[train_idx].copy()
     val_df = df.iloc[val_idx].copy()
     
-    # 训练集：只保留轻量级的几何/色彩增强和归一化
+    # 训练集：加入防御性的 Resize(384)，并保留轻量级的几何/色彩增强和归一化
     train_transform = transforms.Compose([
+        transforms.Resize((384, 384)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
         transforms.RandomRotation(degrees=15),
@@ -54,8 +54,9 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # 验证集：只做张量化和归一化
+    # 验证集：加入防御性的 Resize(384)
     val_transform = transforms.Compose([
+        transforms.Resize((384, 384)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])

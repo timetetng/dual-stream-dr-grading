@@ -9,8 +9,10 @@ from src.models.loss import JointOrdinalLoss
 from src.engine import train_one_epoch, evaluate
 from src.utils import calculate_qwk, plot_confusion_matrix
 
-def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=3):
-    """运行单组实验并返回最佳 QWK"""
+from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
+
+def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=30):
+    """运行单组实验并返回最佳 QWK，同时记录训练曲线"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
     print(f"{'='*50}")
@@ -28,31 +30,45 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         criterion = nn.CrossEntropyLoss()
         
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
-    # 引入文档中设计的余弦退火学习率策略
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
     best_qwk = 0.0
     os.makedirs(f"{output_dir}/weights", exist_ok=True)
     
+    # 新增：用于记录训练历史
+    history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
+    
     for epoch in range(num_epochs):
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
-        # 更新学习率
         scheduler.step()
         
-        print(f"Epoch {epoch+1}/{num_epochs} | Val Loss: {val_loss:.4f} | Val QWK: {val_qwk:.4f}")
+        # 记录到 history 字典中
+        history['train_loss'].append(train_loss)
+        history['val_loss'].append(val_loss)
+        history['val_qwk'].append(val_qwk)
+        
+        print(f"Epoch {epoch+1}/{num_epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val QWK: {val_qwk:.4f}")
         
         if val_qwk > best_qwk:
             best_qwk = val_qwk
             
-            # 补充保存模型权重的逻辑
             weight_filename = "best_dual_stream_ordinal.pth" if config['use_ordinal'] else f"best_{exp_name.replace(' ', '_')[:10]}.pth"
             weights_path = os.path.join(output_dir, "weights", weight_filename)
             torch.save(model.state_dict(), weights_path)
             
-            cm_path = f"{output_dir}/reports/ablation_{exp_name}_best_cm.png"
+            cm_path = f"{output_dir}/reports/ablation_{exp_name.replace(' ', '_')[:10]}_best_cm.png"
             plot_confusion_matrix(val_labels, val_preds, cm_path)
+    
+    # Epoch 跑完后，保存训练过程数据并画图
+    history_df = pd.DataFrame(history)
+    safe_exp_name = exp_name.replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')
+    history_csv_path = f"{output_dir}/reports/history_{safe_exp_name}.csv"
+    history_df.to_csv(history_csv_path, index=False)
+    
+    curve_path = f"{output_dir}/reports/curves_{safe_exp_name}.png"
+    plot_training_curves(history, curve_path)
             
     print(f"Experiment {exp_name} completed. Best QWK: {best_qwk:.4f}")
     return best_qwk
@@ -86,7 +102,7 @@ def main():
     results = []
     
     for exp_name, config in experiments.items():
-        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=3)
+        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=20)
         results.append({"Model Variant": exp_name, "Best QWK": best_qwk})
         
     # 优先保存到 CSV，确保数据安全
@@ -95,7 +111,7 @@ def main():
     df_results.to_csv(csv_save_path, index=False)
     print(f"\nResults securely saved to {csv_save_path}")
     
-    # 尝试打印 Markdown 表格
+    # 打印 Markdown 表格
     print("\n\n" + "="*50)
     print("🏆 Ablation Study Results 🏆")
     print("="*50)

@@ -15,11 +15,11 @@
 │   ├── engine.py              # 训练与验证逻辑 (标准 train_one_epoch, evaluate_one_epoch)
 │   └── utils.py               # 工具函数 (QWK计算、日志记录、混淆矩阵可视化)
 ├── configs/                   # 配置文件目录
-│   └── default_config.yaml    # 存放超参数 (尺寸、学习率、Batch Size、随机种子)
+│   └── config.yaml    # 存放超参数 (尺寸、学习率、Batch Size、随机种子)
 ├── outputs/                   # 实验输出目录
-│   ├── logs/                  # TensorBoard 日志或文本日志
+│   ├── logs/                  # 日志或文本日志
 │   ├── weights/               # 保存的 .pth 模型权重
-│   └── reports/               # 输出结果报告 (混淆矩阵图、Grad-CAM可视化图等)
+│   └── reports/               # 输出结果报告 (混淆矩阵图、可视化图等)
 ├── main.py                    # 主入口文件，解析配置并启动训练/测试
 ├── requirements.txt           # 依赖包列表
 └── README.md
