@@ -1,41 +1,26 @@
 import os
-import cv2
 import torch
-import numpy as np
-from torch.utils.data import Dataset
+import pandas as pd
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
+from torchvision import transforms
 from PIL import Image
+from sklearn.model_selection import StratifiedKFold
 
 class APTOSDataset(Dataset):
-    def __init__(self, csv_file, img_dir, transform=None, is_train=True):
-        """
-        初始化数据集
-        :param csv_file: 包含 id_code 和 diagnosis 的 DataFrame
-        :param img_dir: 图像所在的文件夹路径
-        :param transform: torchvision.transforms 数据增强管道
-        :param is_train: 是否为训练模式
-        """
-        self.data = csv_file
-        self.img_dir = img_dir
+    def __init__(self, dataframe, img_dir, transform=None, is_train=True):
+        self.data = dataframe.reset_index(drop=True)
+        # 这里的 img_dir 之后在 main.py 里要传 'data/processed/train_images'
+        self.img_dir = img_dir 
         self.transform = transform
         self.is_train = is_train
 
     def __len__(self):
         return len(self.data)
 
-    def preprocess_image(self, img_path):
-        """
-        执行基础的图像清洗：读取、裁剪黑边、转换为 RGB
-        """
-        image = cv2.imread(img_path)
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        # TODO: 在此处加入裁剪黑边和 CLAHE 增强的具体逻辑
-        return Image.fromarray(image)
-
     def __getitem__(self, idx):
         img_id = self.data.iloc[idx]['id_code']
         img_path = os.path.join(self.img_dir, f"{img_id}.png")
-        
-        image = self.preprocess_image(img_path)
+        image = Image.open(img_path).convert('RGB')
         
         if self.transform:
             image = self.transform(image)
@@ -45,3 +30,47 @@ class APTOSDataset(Dataset):
             return image, torch.tensor(label, dtype=torch.long)
         else:
             return image, img_id
+
+def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5, fold_idx=0):
+    """
+    获取数据加载器
+    """
+    df = pd.read_csv(csv_path)
+    
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    folds = list(skf.split(df['id_code'], df['diagnosis']))
+    train_idx, val_idx = folds[fold_idx]
+    
+    train_df = df.iloc[train_idx].copy()
+    val_df = df.iloc[val_idx].copy()
+    
+    # 训练集：只保留轻量级的几何/色彩增强和归一化
+    train_transform = transforms.Compose([
+        transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomVerticalFlip(p=0.5),
+        transforms.RandomRotation(degrees=15),
+        transforms.ColorJitter(brightness=0.1, contrast=0.1, hue=0.05),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    # 验证集：只做张量化和归一化
+    val_transform = transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    
+    train_dataset = APTOSDataset(train_df, img_dir, transform=train_transform, is_train=True)
+    val_dataset = APTOSDataset(val_df, img_dir, transform=val_transform, is_train=True)
+    
+    # 类别不平衡处理
+    class_counts = train_df['diagnosis'].value_counts().sort_index().values
+    class_weights = 1.0 / class_counts
+    sample_weights = [class_weights[label] for label in train_df['diagnosis'].values]
+    sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
+    
+    # 加入 pin_memory=True 锁页内存加速数据从 CPU 向 GPU 传输
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=num_workers, drop_last=True, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    
+    return train_loader, val_loader
