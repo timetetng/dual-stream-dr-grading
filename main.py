@@ -39,7 +39,8 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
     
     for epoch in range(num_epochs):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device)
+        # 注意：这里显式传入 accumulation_steps=1，因为我们下面增大了真实的 batch_size
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=1)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
         scheduler.step()
@@ -82,7 +83,13 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    train_loader, val_loader = get_dataloaders(csv_path, img_dir, batch_size=4, num_workers=4)
+    # 开启 CuDNN 基准测试，提升固定尺寸输入下的卷积速度
+    if device.type == 'cuda':
+        torch.backends.cudnn.benchmark = True
+    
+    # 尝试将 batch_size 提高到 16 (如果 OOM 可以退回到 12 或 8)
+    # 保持 num_workers 为 4，如果你的 CPU 核心多可以尝试 8 看看是否能进一步提升 GPU 利用率
+    train_loader, val_loader = get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=8)
     
     experiments = {
         "Baseline (Spatial Only)": {
@@ -102,7 +109,7 @@ def main():
     results = []
     
     for exp_name, config in experiments.items():
-        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=20)
+        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=50)
         results.append({"Model Variant": exp_name, "Best QWK": best_qwk})
         
     # 优先保存到 CSV，确保数据安全

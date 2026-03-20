@@ -4,6 +4,7 @@ from tqdm import tqdm
 def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulation_steps=4):
     """
     包含 AMP (自动混合精度) 和梯度累加的完整单轮训练函数 (已修复 PyTorch 2.x API 警告)
+    添加了 non_blocking=True 提升数据传输与计算的并行度
     """
     model.train()
     running_loss = 0.0
@@ -13,8 +14,9 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulatio
     
     pbar = tqdm(dataloader, desc="Training")
     for i, (images, labels) in enumerate(pbar):
-        images = images.to(device)
-        labels = labels.to(device)
+        # 加上 non_blocking=True 配合 pin_memory 异步传输
+        images = images.to(device, non_blocking=True)
+        labels = labels.to(device, non_blocking=True)
         
         with torch.amp.autocast('cuda'):
             outputs = model(images)
@@ -38,6 +40,7 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulatio
 def evaluate(model, dataloader, criterion, device, metric_fn):
     """
     完整的验证/测试函数
+    添加了 non_blocking=True
     """
     model.eval()
     running_loss = 0.0
@@ -47,8 +50,8 @@ def evaluate(model, dataloader, criterion, device, metric_fn):
     with torch.no_grad():
         pbar = tqdm(dataloader, desc="Evaluating")
         for images, labels in pbar:
-            images = images.to(device)
-            labels = labels.to(device)
+            images = images.to(device, non_blocking=True)
+            labels = labels.to(device, non_blocking=True)
             
             with torch.amp.autocast('cuda'):
                 outputs = model(images)

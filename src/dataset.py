@@ -30,7 +30,7 @@ class APTOSDataset(Dataset):
         else:
             return image, img_id
 
-def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5, fold_idx=0):
+def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=8, n_splits=5, fold_idx=0):
     """
     获取数据加载器
     """
@@ -43,9 +43,8 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
     train_df = df.iloc[train_idx].copy()
     val_df = df.iloc[val_idx].copy()
     
-    # 训练集：加入防御性的 Resize(384)，并保留轻量级的几何/色彩增强和归一化
+    # 训练集
     train_transform = transforms.Compose([
-        transforms.Resize((384, 384)),
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
         transforms.RandomRotation(degrees=15),
@@ -54,9 +53,8 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
     
-    # 验证集：加入防御性的 Resize(384)
+    # 验证集
     val_transform = transforms.Compose([
-        transforms.Resize((384, 384)),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -70,8 +68,24 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
     sample_weights = [class_weights[label] for label in train_df['diagnosis'].values]
     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
     
-    # 加入 pin_memory=True 锁页内存加速数据从 CPU 向 GPU 传输
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=sampler, num_workers=num_workers, drop_last=True, pin_memory=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    # 加入 persistent_workers=True 防止每个 epoch 重新创建进程造成卡顿
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        sampler=sampler, 
+        num_workers=num_workers, 
+        drop_last=True, 
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
+    
+    val_loader = DataLoader(
+        val_dataset, 
+        batch_size=batch_size, 
+        shuffle=False, 
+        num_workers=num_workers, 
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False
+    )
     
     return train_loader, val_loader
