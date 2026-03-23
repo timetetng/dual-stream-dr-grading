@@ -1,6 +1,7 @@
 import os
 import torch
 import pandas as pd
+import numpy as np
 from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torchvision import transforms
 from PIL import Image
@@ -47,8 +48,9 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=8, n_splits=5,
     train_transform = transforms.Compose([
         transforms.RandomHorizontalFlip(p=0.5),
         transforms.RandomVerticalFlip(p=0.5),
-        transforms.RandomRotation(degrees=15),
-        transforms.ColorJitter(brightness=0.1, contrast=0.1, hue=0.05),
+        transforms.RandomRotation(degrees=90), # 放大旋转角度
+        transforms.RandomAffine(degrees=0, translate=(0.1, 0.1), scale=(0.9, 1.1)), # 新增：平移与缩放
+        transforms.ColorJitter(brightness=0.15, contrast=0.15), # 移除 hue，稍微提升亮度和对比度抖动
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
@@ -64,7 +66,10 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=8, n_splits=5,
     
     # 类别不平衡处理
     class_counts = train_df['diagnosis'].value_counts().sort_index().values
-    class_weights = 1.0 / class_counts
+    # 反比加权采样
+    #class_weights = 1.0 / class_counts
+    # 平方反比采样
+    class_weights = 1.0 / np.sqrt(class_counts)
     sample_weights = [class_weights[label] for label in train_df['diagnosis'].values]
     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
     
