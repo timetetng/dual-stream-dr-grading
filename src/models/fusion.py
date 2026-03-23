@@ -14,8 +14,8 @@ class SpatialBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.4)  # 适度的 Dropout
+            nn.ReLU(inplace=True)
+            # 移除了 Dropout，保证空域特征完整性
         )
 
     def forward(self, x):
@@ -46,8 +46,8 @@ class FrequencyBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.4) 
+            nn.ReLU(inplace=True)
+            # 移除了 Dropout，让轻量级 CNN 能充分拟合
         )
 
     def forward_fft(self, x):
@@ -66,15 +66,14 @@ class FrequencyBranch(nn.Module):
         return feat
 
 class DynamicGatedFusion(nn.Module):
-    """改进的动态门控融合模块"""
+    """恢复 V1 版本的高效动态门控融合模块"""
     def __init__(self, embed_dim=512):
         super(DynamicGatedFusion, self).__init__()
         self.gate = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim // 2),
-            nn.BatchNorm1d(embed_dim // 2),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dim // 2, 2),
-            nn.Sigmoid() 
+            nn.Softmax(dim=1)  # 恢复 Softmax，利用特征竞争机制
         )
 
     def forward(self, feat_spatial, feat_freq):
@@ -92,8 +91,7 @@ class ConcatFusion(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.3)
+            nn.ReLU(inplace=True)
         )
 
     def forward(self, feat_spatial, feat_freq):
@@ -119,10 +117,7 @@ class DualStreamNet(nn.Module):
             else:
                 raise ValueError("fusion_type must be 'gated' or 'concat'")
                 
-        self.classifier = nn.Sequential(
-            nn.Dropout(p=0.3),
-            nn.Linear(embed_dim, num_classes)
-        )
+        self.classifier = nn.Linear(embed_dim, num_classes)
 
     def forward(self, x):
         feat_spatial = self.spatial_branch(x)

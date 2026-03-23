@@ -9,7 +9,7 @@ from src.models.loss import JointOrdinalLoss
 from src.engine import train_one_epoch, evaluate
 from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
 
-def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=40):
+def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=40, accumulation_steps=4):
     """运行单组实验：融合分层学习率、L2正则化与早停机制"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
@@ -37,11 +37,10 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         else:
             new_params.append(param)
             
-    # L2 正则化设为 5e-4 配合模型内部的 Dropout
     optimizer = optim.Adam([
         {'params': pretrained_params, 'lr': 1e-5}, 
         {'params': new_params, 'lr': 1e-4}
-    ], weight_decay=5e-4) 
+    ], weight_decay=1e-4) 
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
@@ -53,7 +52,8 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
     
     for epoch in range(num_epochs):
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=4)
+        # 这里将外部传入的 accumulation_steps 传递给 train_one_epoch
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=accumulation_steps)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
         scheduler.step()
