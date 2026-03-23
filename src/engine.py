@@ -3,8 +3,9 @@ from tqdm import tqdm
 
 def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulation_steps=4):
     """
-    包含 AMP (自动混合精度) 和梯度累加的完整单轮训练函数 (已修复 PyTorch 2.x API 警告)
+    包含 AMP (自动混合精度) 和梯度累加的完整单轮训练函数
     添加了 non_blocking=True 提升数据传输与计算的并行度
+    加入梯度裁剪以防止序数回归带来的梯度爆炸与震荡
     """
     model.train()
     running_loss = 0.0
@@ -26,6 +27,13 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulatio
         scaler.scale(loss).backward()
         
         if (i + 1) % accumulation_steps == 0 or (i + 1) == len(dataloader):
+            # --- 新增：AMP 下的安全梯度裁剪 ---
+            # 1. 先将梯度取消缩放，恢复到真实大小
+            scaler.unscale_(optimizer)
+            # 2. 将所有梯度的最大范数限制为 1.0，防止梯度爆炸引发模型震荡
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # --------------------------------
+            
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()

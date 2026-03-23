@@ -64,21 +64,26 @@ class FrequencyBranch(nn.Module):
         return feat
 
 class DynamicGatedFusion(nn.Module):
-    """动态门控融合模块"""
+    """改进的动态门控融合模块：使用 Sigmoid 替代 Softmax，打破零和博弈"""
     def __init__(self, embed_dim=512):
         super(DynamicGatedFusion, self).__init__()
         self.gate = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim // 2),
+            nn.BatchNorm1d(embed_dim // 2),  # 新增：加入 BN 稳定训练，防止极值
             nn.ReLU(inplace=True),
             nn.Linear(embed_dim // 2, 2),
-            nn.Softmax(dim=1)
+            nn.Sigmoid()  # 修改：使用 Sigmoid，允许两种特征的权重同时接近 1
         )
 
     def forward(self, feat_spatial, feat_freq):
         concat_feat = torch.cat([feat_spatial, feat_freq], dim=1)
         weights = self.gate(concat_feat)
+        
+        # 分离权重并扩展维度
         w_spatial = weights[:, 0].unsqueeze(1)
         w_freq = weights[:, 1].unsqueeze(1)
+        
+        # 独立加权后相加
         fused_feat = w_spatial * feat_spatial + w_freq * feat_freq
         return fused_feat, w_spatial, w_freq
 

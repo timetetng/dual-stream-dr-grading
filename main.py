@@ -7,15 +7,17 @@ from src.dataset import get_dataloaders
 from src.models.fusion import DualStreamNet
 from src.models.loss import JointOrdinalLoss
 from src.engine import train_one_epoch, evaluate
-from src.utils import calculate_qwk, plot_confusion_matrix
-
 from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
 
-def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=30):
-    """运行单组实验并返回最佳 QWK，同时记录训练曲线"""
+def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=30, accumulation_steps=4):
+    """运行单组实验并返回最佳 QWK，引入分层学习率策略与梯度累加"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
     print(f"{'='*50}")
+    
+    # 每次实验开始前清空显存缓存，防止上个实验的无用变量占用空间
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     
     model = DualStreamNet(
         num_classes=5, 
@@ -25,27 +27,40 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     ).to(device)
     
     if config['use_ordinal']:
-        criterion = JointOrdinalLoss(alpha=0.5)
+        criterion = JointOrdinalLoss(alpha=0.1)  # 使用较小的 alpha
     else:
         criterion = nn.CrossEntropyLoss()
         
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    # --- 新增：分层学习率设置 ---
+    pretrained_params = []
+    new_params = []
+    for name, param in model.named_parameters():
+        if 'spatial_branch' in name:
+            pretrained_params.append(param)
+        else:
+            new_params.append(param)
+            
+    # ResNet50 使用 1e-5，随机初始化的频域/融合层使用 1e-4
+    optimizer = optim.Adam([
+        {'params': pretrained_params, 'lr': 1e-5}, 
+        {'params': new_params, 'lr': 1e-4}
+    ], weight_decay=5e-4) # 加入轻微的 L2 正则化防止过拟合
+    # ----------------------------
+
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
     best_qwk = 0.0
     os.makedirs(f"{output_dir}/weights", exist_ok=True)
     
-    # 新增：用于记录训练历史
     history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
     
     for epoch in range(num_epochs):
-        # 注意：这里显式传入 accumulation_steps=1，因为我们下面增大了真实的 batch_size
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=1)
+        # 传入 accumulation_steps
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=accumulation_steps)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
         scheduler.step()
         
-        # 记录到 history 字典中
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         history['val_qwk'].append(val_qwk)
@@ -54,7 +69,6 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         
         if val_qwk > best_qwk:
             best_qwk = val_qwk
-            
             weight_filename = "best_dual_stream_ordinal.pth" if config['use_ordinal'] else f"best_{exp_name.replace(' ', '_')[:10]}.pth"
             weights_path = os.path.join(output_dir, "weights", weight_filename)
             torch.save(model.state_dict(), weights_path)
@@ -62,7 +76,6 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
             cm_path = f"{output_dir}/reports/ablation_{exp_name.replace(' ', '_')[:10]}_best_cm.png"
             plot_confusion_matrix(val_labels, val_preds, cm_path)
     
-    # Epoch 跑完后，保存训练过程数据并画图
     history_df = pd.DataFrame(history)
     safe_exp_name = exp_name.replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')
     history_csv_path = f"{output_dir}/reports/history_{safe_exp_name}.csv"
@@ -72,6 +85,12 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     plot_training_curves(history, curve_path)
             
     print(f"Experiment {exp_name} completed. Best QWK: {best_qwk:.4f}")
+    
+    # 实验结束后再清理一次显存
+    del model, optimizer, criterion
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        
     return best_qwk
 
 def main():
@@ -87,9 +106,9 @@ def main():
     if device.type == 'cuda':
         torch.backends.cudnn.benchmark = True
     
-    # 尝试将 batch_size 提高到 16 (如果 OOM 可以退回到 12 或 8)
-    # 保持 num_workers 为 4，如果你的 CPU 核心多可以尝试 8 看看是否能进一步提升 GPU 利用率
-    train_loader, val_loader = get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=8)
+    # 修改：为了防止双流网络 OOM，将 batch_size 降到 8 (后续利用 accumulation_steps=4 维持有效批次大小为 16)
+    # 适度下调 num_workers 到 4，避免多进程抢占内存/显存
+    train_loader, val_loader = get_dataloaders(csv_path, img_dir, batch_size=8, num_workers=4)
     
     experiments = {
         "Baseline (Spatial Only)": {
@@ -109,7 +128,8 @@ def main():
     results = []
     
     for exp_name, config in experiments.items():
-        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=50)
+        # 修改：传入 accumulation_steps=4
+        best_qwk = run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=30, accumulation_steps=4)
         results.append({"Model Variant": exp_name, "Best QWK": best_qwk})
         
     # 优先保存到 CSV，确保数据安全
