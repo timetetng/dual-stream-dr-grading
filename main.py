@@ -9,15 +9,14 @@ from src.models.loss import JointOrdinalLoss
 from src.engine import train_one_epoch, evaluate
 from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
 
-def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=30, accumulation_steps=4):
-    """运行单组实验并返回最佳 QWK，引入分层学习率策略与梯度累加"""
+def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=50):
+    """运行单组实验并返回最佳 QWK，引入早停与 L2 正则化"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
     print(f"{'='*50}")
     
-    # 每次实验开始前清空显存缓存，防止上个实验的无用变量占用空间
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+    # 每次实验前清理显存
+    torch.cuda.empty_cache()
     
     model = DualStreamNet(
         num_classes=5, 
@@ -27,11 +26,10 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     ).to(device)
     
     if config['use_ordinal']:
-        criterion = JointOrdinalLoss(alpha=0.1)  # 使用较小的 alpha
+        criterion = JointOrdinalLoss(alpha=0.1)
     else:
         criterion = nn.CrossEntropyLoss()
         
-    # --- 新增：分层学习率设置 ---
     pretrained_params = []
     new_params = []
     for name, param in model.named_parameters():
@@ -40,23 +38,24 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         else:
             new_params.append(param)
             
-    # ResNet50 使用 1e-5，随机初始化的频域/融合层使用 1e-4
+    # 新增：将 weight_decay 从默认的 0 提高到 1e-3，用 L2 正则化强力抑制过拟合
     optimizer = optim.Adam([
         {'params': pretrained_params, 'lr': 1e-5}, 
         {'params': new_params, 'lr': 1e-4}
-    ], weight_decay=5e-4) # 加入轻微的 L2 正则化防止过拟合
-    # ----------------------------
+    ], weight_decay=1e-3) 
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
     best_qwk = 0.0
-    os.makedirs(f"{output_dir}/weights", exist_ok=True)
+    # 新增：早停机制变量
+    patience = 10 
+    epochs_no_improve = 0
     
+    os.makedirs(f"{output_dir}/weights", exist_ok=True)
     history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
     
     for epoch in range(num_epochs):
-        # 传入 accumulation_steps
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=accumulation_steps)
+        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=4)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
         scheduler.step()
@@ -69,13 +68,23 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         
         if val_qwk > best_qwk:
             best_qwk = val_qwk
+            epochs_no_improve = 0  # 重置耐心值
+            
             weight_filename = "best_dual_stream_ordinal.pth" if config['use_ordinal'] else f"best_{exp_name.replace(' ', '_')[:10]}.pth"
             weights_path = os.path.join(output_dir, "weights", weight_filename)
             torch.save(model.state_dict(), weights_path)
             
             cm_path = f"{output_dir}/reports/ablation_{exp_name.replace(' ', '_')[:10]}_best_cm.png"
             plot_confusion_matrix(val_labels, val_preds, cm_path)
-    
+        else:
+            epochs_no_improve += 1
+            print(f"  -> No improvement for {epochs_no_improve} epoch(s).")
+            
+        # 触发早停
+        if epochs_no_improve >= patience:
+            print(f"\nEarly stopping triggered! Model hasn't improved for {patience} epochs.")
+            break
+            
     history_df = pd.DataFrame(history)
     safe_exp_name = exp_name.replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')
     history_csv_path = f"{output_dir}/reports/history_{safe_exp_name}.csv"
@@ -86,11 +95,10 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
             
     print(f"Experiment {exp_name} completed. Best QWK: {best_qwk:.4f}")
     
-    # 实验结束后再清理一次显存
+    # 实验结束后强制回收内存和显存
     del model, optimizer, criterion
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-        
+    torch.cuda.empty_cache()
+    
     return best_qwk
 
 def main():

@@ -14,7 +14,8 @@ class SpatialBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.4)  # 适度的 Dropout
         )
 
     def forward(self, x):
@@ -45,7 +46,8 @@ class FrequencyBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.4) 
         )
 
     def forward_fft(self, x):
@@ -64,43 +66,39 @@ class FrequencyBranch(nn.Module):
         return feat
 
 class DynamicGatedFusion(nn.Module):
-    """改进的动态门控融合模块：使用 Sigmoid 替代 Softmax，打破零和博弈"""
+    """改进的动态门控融合模块"""
     def __init__(self, embed_dim=512):
         super(DynamicGatedFusion, self).__init__()
         self.gate = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim // 2),
-            nn.BatchNorm1d(embed_dim // 2),  # 新增：加入 BN 稳定训练，防止极值
+            nn.BatchNorm1d(embed_dim // 2),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dim // 2, 2),
-            nn.Sigmoid()  # 修改：使用 Sigmoid，允许两种特征的权重同时接近 1
+            nn.Sigmoid() 
         )
 
     def forward(self, feat_spatial, feat_freq):
         concat_feat = torch.cat([feat_spatial, feat_freq], dim=1)
         weights = self.gate(concat_feat)
-        
-        # 分离权重并扩展维度
         w_spatial = weights[:, 0].unsqueeze(1)
         w_freq = weights[:, 1].unsqueeze(1)
-        
-        # 独立加权后相加
         fused_feat = w_spatial * feat_spatial + w_freq * feat_freq
         return fused_feat, w_spatial, w_freq
 
 class ConcatFusion(nn.Module):
-    """简单拼接融合模块 (用于消融实验对比)"""
+    """简单拼接融合模块"""
     def __init__(self, embed_dim=512):
         super(ConcatFusion, self).__init__()
         self.fc = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.3)
         )
 
     def forward(self, feat_spatial, feat_freq):
         concat_feat = torch.cat([feat_spatial, feat_freq], dim=1)
         fused_feat = self.fc(concat_feat)
-        # 为了接口统一，返回空的权重占位符
         return fused_feat, None, None
 
 class DualStreamNet(nn.Module):
@@ -121,12 +119,14 @@ class DualStreamNet(nn.Module):
             else:
                 raise ValueError("fusion_type must be 'gated' or 'concat'")
                 
-        self.classifier = nn.Linear(embed_dim, num_classes)
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=0.3),
+            nn.Linear(embed_dim, num_classes)
+        )
 
     def forward(self, x):
         feat_spatial = self.spatial_branch(x)
         
-        # 如果消融掉了频域分支，直接用空域特征进行分类
         if not self.use_freq:
             return self.classifier(feat_spatial)
             
