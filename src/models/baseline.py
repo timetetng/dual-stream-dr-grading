@@ -13,3 +13,4 @@ def build_baseline_resnet(num_classes=5):
     model.fc = nn.Linear(num_ftrs, num_classes)
     
     return model
+
