@@ -9,13 +9,12 @@ from src.models.loss import JointOrdinalLoss
 from src.engine import train_one_epoch, evaluate
 from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
 
-def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=50):
-    """运行单组实验并返回最佳 QWK，引入早停与 L2 正则化"""
+def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=40):
+    """运行单组实验：融合分层学习率、L2正则化与早停机制"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
     print(f"{'='*50}")
     
-    # 每次实验前清理显存
     torch.cuda.empty_cache()
     
     model = DualStreamNet(
@@ -38,17 +37,16 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         else:
             new_params.append(param)
             
-    # 新增：将 weight_decay 从默认的 0 提高到 1e-3，用 L2 正则化强力抑制过拟合
+    # L2 正则化设为 5e-4 配合模型内部的 Dropout
     optimizer = optim.Adam([
         {'params': pretrained_params, 'lr': 1e-5}, 
         {'params': new_params, 'lr': 1e-4}
-    ], weight_decay=1e-3) 
+    ], weight_decay=5e-4) 
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
     best_qwk = 0.0
-    # 新增：早停机制变量
-    patience = 10 
+    patience = 12  # 连续 12 个 Epoch 不见提升则早停
     epochs_no_improve = 0
     
     os.makedirs(f"{output_dir}/weights", exist_ok=True)
@@ -68,7 +66,7 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         
         if val_qwk > best_qwk:
             best_qwk = val_qwk
-            epochs_no_improve = 0  # 重置耐心值
+            epochs_no_improve = 0  
             
             weight_filename = "best_dual_stream_ordinal.pth" if config['use_ordinal'] else f"best_{exp_name.replace(' ', '_')[:10]}.pth"
             weights_path = os.path.join(output_dir, "weights", weight_filename)
@@ -80,7 +78,6 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
             epochs_no_improve += 1
             print(f"  -> No improvement for {epochs_no_improve} epoch(s).")
             
-        # 触发早停
         if epochs_no_improve >= patience:
             print(f"\nEarly stopping triggered! Model hasn't improved for {patience} epochs.")
             break
@@ -95,7 +92,6 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
             
     print(f"Experiment {exp_name} completed. Best QWK: {best_qwk:.4f}")
     
-    # 实验结束后强制回收内存和显存
     del model, optimizer, criterion
     torch.cuda.empty_cache()
     
