@@ -10,7 +10,7 @@ from src.engine import train_one_epoch, evaluate
 from src.utils import calculate_qwk, plot_confusion_matrix, plot_training_curves
 
 def run_experiment(exp_name, config, train_loader, val_loader, device, output_dir, num_epochs=40, accumulation_steps=4):
-    """运行单组实验：融合分层学习率、L2正则化与早停机制"""
+    """运行单组实验：融合分层学习率、L2正则化与早停机制 (已填入 Optuna 搜索出的最优超参数)"""
     print(f"\n{'='*50}")
     print(f"Starting Experiment: {exp_name}")
     print(f"{'='*50}")
@@ -25,7 +25,8 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     ).to(device)
     
     if config['use_ordinal']:
-        criterion = JointOrdinalLoss(alpha=0.1)
+        # 填入最优参数: alpha = 0.44476
+        criterion = JointOrdinalLoss(alpha=0.4448)
     else:
         criterion = nn.CrossEntropyLoss()
         
@@ -37,10 +38,11 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
         else:
             new_params.append(param)
             
+    # 填入最优参数: lr_pretrained = 4.57e-5, lr_new = 1.92e-5, weight_decay = 2.96e-5
     optimizer = optim.Adam([
-        {'params': pretrained_params, 'lr': 1e-5}, 
-        {'params': new_params, 'lr': 1e-4}
-    ], weight_decay=1e-4) 
+        {'params': pretrained_params, 'lr': 4.57e-5}, 
+        {'params': new_params, 'lr': 1.92e-5}
+    ], weight_decay=2.96e-5) 
 
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=num_epochs)
     
@@ -52,7 +54,6 @@ def run_experiment(exp_name, config, train_loader, val_loader, device, output_di
     history = {'train_loss': [], 'val_loss': [], 'val_qwk': []}
     
     for epoch in range(num_epochs):
-        # 这里将外部传入的 accumulation_steps 传递给 train_one_epoch
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, accumulation_steps=accumulation_steps)
         val_loss, val_qwk, val_labels, val_preds = evaluate(model, val_loader, criterion, device, calculate_qwk)
         
