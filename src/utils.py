@@ -1,4 +1,7 @@
+# src/utils.py
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # 强制使用非交互式后端，防止与 PyTorch 多进程 DataLoader 冲突
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
