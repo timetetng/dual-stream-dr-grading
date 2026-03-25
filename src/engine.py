@@ -1,21 +1,28 @@
 import torch
-from tqdm import tqdm
+from rich.progress import Progress, TaskID
 
-def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulation_steps=4):
+def train_one_epoch(
+    model, 
+    dataloader, 
+    criterion, 
+    optimizer, 
+    scaler, 
+    device, 
+    accumulation_steps=4,
+    progress: Progress = None,
+    task_id: TaskID = None,
+    parent_advances: list = None
+):
     """
     包含 AMP (自动混合精度) 和梯度累加的完整单轮训练函数
-    添加了 non_blocking=True 提升数据传输与计算的并行度
-    加入梯度裁剪以防止序数回归带来的梯度爆炸与震荡
+    加入了 parent_advances 以支持多级进度条的平滑联动和精确 ETA 计算
     """
     model.train()
     running_loss = 0.0
     
-    scaler = torch.amp.GradScaler('cuda')
     optimizer.zero_grad()
     
-    pbar = tqdm(dataloader, desc="Training")
-    for i, (images, labels) in enumerate(pbar):
-        # 加上 non_blocking=True 配合 pin_memory 异步传输
+    for i, (images, labels) in enumerate(dataloader):
         images = images.to(device, non_blocking=True)
         labels = labels.to(device, non_blocking=True)
         
@@ -27,37 +34,54 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, accumulatio
         scaler.scale(loss).backward()
         
         if (i + 1) % accumulation_steps == 0 or (i + 1) == len(dataloader):
-            # --- 新增：AMP 下的安全梯度裁剪 ---
-            # 1. 先将梯度取消缩放，恢复到真实大小
             scaler.unscale_(optimizer)
-            # 2. 将所有梯度的最大范数限制为 1.0，防止梯度爆炸引发模型震荡
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            # --------------------------------
             
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad()
         
-        # 因为引入了联合损失，loss 的数值会有变化
         real_loss = loss.item() * accumulation_steps
         running_loss += real_loss
-        pbar.set_postfix({'loss': f"{real_loss:.4f}"})
         
+        if progress is not None:
+            # 1. 推进最底层的 Batch 进度条
+            if task_id is not None:
+                progress.update(
+                    task_id, 
+                    advance=1, 
+                    description=f"[cyan]训练中... Loss: {real_loss:.4f}[/cyan]"
+                )
+            # 2. 核心：通过极小浮点数步长，平滑推进外层的 Epoch 和 总体进度条
+            if parent_advances is not None:
+                for pid, amt in parent_advances:
+                    progress.advance(pid, advance=amt)
+            
     return running_loss / len(dataloader)
 
-def evaluate(model, dataloader, criterion, device, metric_fn):
+
+def evaluate(
+    model, 
+    dataloader, 
+    criterion, 
+    device, 
+    metric_fn,
+    progress: Progress = None,
+    task_id: TaskID = None,
+    parent_advances: list = None
+):
     """
     完整的验证/测试函数
-    添加了 non_blocking=True
+    加入了 parent_advances 以支持多级进度条的平滑联动和精确 ETA 计算
     """
     model.eval()
     running_loss = 0.0
     all_preds = []
     all_labels = []
+    all_probs = []  
     
     with torch.no_grad():
-        pbar = tqdm(dataloader, desc="Evaluating")
-        for images, labels in pbar:
+        for images, labels in dataloader:
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
             
@@ -67,11 +91,27 @@ def evaluate(model, dataloader, criterion, device, metric_fn):
                 
             running_loss += loss.item()
             
+            probs = torch.softmax(outputs, dim=1)
+            all_probs.extend(probs.cpu().numpy()) 
+            
             _, preds = torch.max(outputs, 1)
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy())
             
+            if progress is not None:
+                # 1. 推进最底层的 Batch 进度条
+                if task_id is not None:
+                    progress.update(
+                        task_id, 
+                        advance=1, 
+                        description=f"[magenta]验证中... Loss: {loss.item():.4f}[/magenta]"
+                    )
+                # 2. 核心：通过极小浮点数步长，平滑推进外层的 Epoch 和 总体进度条
+                if parent_advances is not None:
+                    for pid, amt in parent_advances:
+                        progress.advance(pid, advance=amt)
+                
     epoch_loss = running_loss / len(dataloader)
     score = metric_fn(all_labels, all_preds)
     
-    return epoch_loss, score, all_labels, all_preds
+    return epoch_loss, score, all_labels, all_preds, all_probs

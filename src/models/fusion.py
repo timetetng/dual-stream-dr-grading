@@ -3,7 +3,6 @@ import torch.nn as nn
 import torchvision.models as models
 
 class SpatialBranch(nn.Module):
-    """空域分支：基于预训练的 ResNet50 提取全局形态学特征"""
     def __init__(self, embed_dim=512):
         super(SpatialBranch, self).__init__()
         weights = models.ResNet50_Weights.IMAGENET1K_V1
@@ -14,8 +13,8 @@ class SpatialBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True)
-            # 移除了 Dropout，保证空域特征完整性
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.3)  # 新增 Dropout 缓解小规模数据集过拟合
         )
 
     def forward(self, x):
@@ -25,7 +24,6 @@ class SpatialBranch(nn.Module):
         return feat
 
 class FrequencyBranch(nn.Module):
-    """频域分支：基于 FFT 与轻量级 CNN 提取纹理特征"""
     def __init__(self, in_channels=3, base_filters=64, embed_dim=512):
         super(FrequencyBranch, self).__init__()
         self.features = nn.Sequential(
@@ -46,8 +44,8 @@ class FrequencyBranch(nn.Module):
         self.projector = nn.Sequential(
             nn.Linear(self.num_ftrs, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True)
-            # 移除了 Dropout，让轻量级 CNN 能充分拟合
+            nn.ReLU(inplace=True),
+            nn.Dropout(p=0.3) # 新增 Dropout
         )
 
     def forward_fft(self, x):
@@ -66,14 +64,13 @@ class FrequencyBranch(nn.Module):
         return feat
 
 class DynamicGatedFusion(nn.Module):
-    """恢复 V1 版本的高效动态门控融合模块"""
     def __init__(self, embed_dim=512):
         super(DynamicGatedFusion, self).__init__()
         self.gate = nn.Sequential(
             nn.Linear(embed_dim * 2, embed_dim // 2),
             nn.ReLU(inplace=True),
             nn.Linear(embed_dim // 2, 2),
-            nn.Softmax(dim=1)  # 恢复 Softmax，利用特征竞争机制
+            nn.Softmax(dim=1)
         )
 
     def forward(self, feat_spatial, feat_freq):
@@ -85,7 +82,6 @@ class DynamicGatedFusion(nn.Module):
         return fused_feat, w_spatial, w_freq
 
 class ConcatFusion(nn.Module):
-    """简单拼接融合模块"""
     def __init__(self, embed_dim=512):
         super(ConcatFusion, self).__init__()
         self.fc = nn.Sequential(
@@ -100,7 +96,6 @@ class ConcatFusion(nn.Module):
         return fused_feat, None, None
 
 class DualStreamNet(nn.Module):
-    """支持消融实验开关的完整双流网络"""
     def __init__(self, num_classes=5, embed_dim=512, use_freq=True, fusion_type='gated'):
         super(DualStreamNet, self).__init__()
         self.use_freq = use_freq
