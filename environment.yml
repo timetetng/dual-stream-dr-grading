@@ -1,0 +1,34 @@
+name: dr_project
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  # 1. 指定 Python 版本
+  - python=3.10
+  
+  # 2. 深度学习核心与底层硬件加速
+  - pytorch=2.6.0
+  - torchvision=0.21.0
+  - pytorch-cuda=12.4  # 取代 pip 中的 +cu124，由 nvidia channel 优雅提供
+  
+  # 3. 科学计算与工具包 
+  - numpy=2.4.3
+  - pandas=3.0.1
+  - scikit-learn=1.8.0
+  - matplotlib=3.10.8
+  - seaborn=0.13.2
+  - pillow=12.1.1
+  - optuna=4.8.0
+  - rich=14.3.3
+  - tqdm=4.67.3
+  
+  # 4. Pip
+  - pip:
+    - albumentations==2.0.8
+    - grad-cam==1.5.5
+    # 注意：同时安装 opencv-python 和 headless 极易引发依赖冲突。
+    # 如果在服务器(如 Fedora)上跑，只留 headless；如果在带桌面的 Arch/Windows 上跑，留 opencv-python。
+    #- opencv-python-headless==4.13.0.92 
+    - opencv-python==4.13.0.92

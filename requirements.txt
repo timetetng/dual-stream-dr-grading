@@ -1,9 +1,13 @@
+albumentations==2.0.8
 grad_cam==1.5.5
 matplotlib==3.10.8
 numpy==2.4.3
 opencv_python==4.13.0.92
+opencv_python_headless==4.13.0.92
+optuna==4.8.0
 pandas==3.0.1
 Pillow==12.1.1
+rich==14.3.3
 scikit_learn==1.8.0
 seaborn==0.13.2
 torch==2.6.0+cu124
