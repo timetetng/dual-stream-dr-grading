@@ -10,7 +10,8 @@ from sklearn.metrics import (
     confusion_matrix, 
     recall_score, 
     f1_score, 
-    roc_auc_score
+    roc_auc_score,
+    accuracy_score  # 新增：导入准确率计算函数
 )
 
 def calculate_qwk(y_true, y_pred):
@@ -19,15 +20,19 @@ def calculate_qwk(y_true, y_pred):
 
 def calculate_medical_metrics(y_true, y_pred, y_probs=None, num_classes=5):
     """
-    计算多分类医学图像评价指标 (Macro Average)
+    计算多分类医学图像评价指标
+    包含整体准确率 (Accuracy) 以及针对长尾分布的宏平均 (Macro Average) 指标
     """
     labels = list(range(num_classes))
     
-    # 召回率 (敏感度 Sensitivity) 和 F1 Score
+    # 1. 整体准确率 (Accuracy) - 迎合常规论文的展示指标
+    accuracy = accuracy_score(y_true, y_pred)
+    
+    # 2. 召回率 (敏感度 Sensitivity) 和 F1 Score (Macro)
     recall = recall_score(y_true, y_pred, labels=labels, average='macro', zero_division=0)
     f1 = f1_score(y_true, y_pred, labels=labels, average='macro', zero_division=0)
     
-    # 特异性 Specificity (多分类下利用混淆矩阵计算 Macro 特异性)
+    # 3. 特异性 Specificity (多分类下利用混淆矩阵计算 Macro 特异性)
     cm = confusion_matrix(y_true, y_pred, labels=labels)
     specificities = []
     for i in range(num_classes):
@@ -37,15 +42,26 @@ def calculate_medical_metrics(y_true, y_pred, y_probs=None, num_classes=5):
         specificities.append(spec)
     specificity = np.mean(specificities)
     
-    # AUC 曲线下面积 (OvR 多分类策略)
+    # 4. 鲁棒的 AUC 曲线下面积计算 (OvR 多分类策略)
     auc = float('nan')
     if y_probs is not None:
-        try:
-            auc = roc_auc_score(y_true, y_probs, multi_class='ovr', average='macro')
-        except ValueError:
-            pass  # 如果 batch 太小导致某些类缺失，跳过报错
+        y_probs_arr = np.array(y_probs)
+        y_true_arr = np.array(y_true)
+        aucs = []
+        
+        # 遍历每一个类别，进行 OvR (One-vs-Rest) 计算
+        for i in range(num_classes):
+            # 只有当该类别在真实标签中同时存在"正例"和"负例"时，才计算 AUC
+            if len(np.unique(y_true_arr == i)) == 2:
+                class_auc = roc_auc_score((y_true_arr == i).astype(int), y_probs_arr[:, i])
+                aucs.append(class_auc)
+                
+        # 取有效计算出的类别的 Macro 平均值
+        if len(aucs) > 0:
+            auc = np.mean(aucs)
             
-    return recall, specificity, f1, auc
+    # 将 accuracy 作为第五个返回值
+    return recall, specificity, f1, auc, accuracy
 
 def plot_confusion_matrix(y_true, y_pred, save_path):
     """生成并保存混淆矩阵图像，用于分析跨级误判"""

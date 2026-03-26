@@ -84,9 +84,9 @@ def get_dataloaders(csv_path, img_dir, batch_size=16, num_workers=4, n_splits=5,
     val_dataset = APTOSDataset(val_df, img_dir, transform=get_transforms('val'), is_train=True)
     test_dataset = APTOSDataset(test_df, img_dir, transform=get_transforms('val'), is_train=True)
     
-    # 3. 平方根反比加权采样，应对 PDR 等级仅占 2% 的长尾分布
+    # 3. 绝对反比加权采样，以牺牲少量整体一致性为代价，最大化重症(PDR)的召回率
     class_counts = train_df['diagnosis'].value_counts().sort_index().values
-    class_weights = 1.0 / np.sqrt(class_counts)
+    class_weights = 1.0 / class_counts
     sample_weights = [class_weights[label] for label in train_df['diagnosis'].values]
     sampler = WeightedRandomSampler(weights=sample_weights, num_samples=len(sample_weights), replacement=True)
     

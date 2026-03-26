@@ -75,6 +75,7 @@ def main():
     
     table = Table(show_header=True, header_style="bold magenta")
     table.add_column("Model Variant", style="dim", width=35)
+    table.add_column("Accuracy", justify="right")
     table.add_column("Val QWK", justify="right")
     table.add_column("Test QWK", justify="right")
     table.add_column("Recall", justify="right")
@@ -85,6 +86,7 @@ def main():
     for row in results:
         table.add_row(
             row["Model Variant"],
+            f"{row['Accuracy']:.4f}", 
             f"{row['Val QWK']:.4f}",
             f"{row['Test QWK']:.4f}",
             f"{row['Recall']:.4f}",

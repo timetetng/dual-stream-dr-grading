@@ -3,52 +3,54 @@ import os
 
 class BaseConfig:
     """全局基础超参数配置"""
-    # 随机种子与训练参数
     SEED = 42
-    NUM_EPOCHS = 2
-    BATCH_SIZE = 8
-    NUM_WORKERS = 4
-    ACCUMULATION_STEPS = 4
-    PATIENCE = 12
+    NUM_EPOCHS = 10 # 总训练轮次
+    NUM_WORKERS = 4 # CPU读取线程数
+    BATCH_SIZE = 8 # 单次样本数
+    ACCUMULATION_STEPS = 4 # 梯度累加步数，等效批次 = 单次样本数 * 梯度累加步数
+    PATIENCE = 12 # 早停阈值
     
-    # 路径配置
     CSV_PATH = 'data/raw/train.csv'
     IMG_DIR = 'data/processed/train_images'
     OUTPUT_DIR = 'outputs'
     
-    # 优化器与学习率
-    LR_PRETRAINED = 4.57e-5
-    LR_NEW = 1.92e-5
-    WEIGHT_DECAY = 2.96e-5
-    
-    # 损失函数超参
-    ORDINAL_ALPHA = 0.4448
+    LR_PRETRAINED = 4.57e-5 # 迁移模型学习率
+    LR_NEW = 1.92e-5 # 新层学习率
+    WEIGHT_DECAY = 2.96e-5 # 遗忘惩罚
+    ORDINAL_ALPHA = 0.05 # 序数回归 SmoothL1 正则化惩罚系数
 
-# 消融实验矩阵配置
-# 你可以通过修改 "enabled" 的 True/False 来自由控制是否运行该组实验
+# 消融实验矩阵：论证数学先验的优越性
 EXPERIMENTS = {
+    # 对照组 1：只有传统的空间图（基线）
     "Baseline (Spatial Only)": {
         "enabled": True,
         "use_freq": False, 
         "fusion_type": "concat", 
-        "use_ordinal": False
+        "use_ordinal": False,
+        "freq_type": "magnitude"
     },
-    "+ Freq (Concat Fusion)": {
-        "enabled": True,
-        "use_freq": True,  
-        "fusion_type": "concat", 
-        "use_ordinal": False
-    },
-    "+ Freq (Gated Fusion)": {
+    # 对照组 2：加入普通幅度谱分支（证明盲目扔频谱图效果有限）
+    "+ Freq (Old: Magnitude)": {
         "enabled": True,
         "use_freq": True,  
         "fusion_type": "gated",  
-        "use_ordinal": False
+        "use_ordinal": False,
+        "freq_type": "magnitude" # 调用旧的 FrequencyBranch
     },
-    "+ Freq (Gated) + Ordinal": {
-        "enabled": True, # 如果不想跑这组，改成 False 即可
+    # 实验组 1：换用数学先验病灶感知分支（证明数学特征的优势）
+    "+ Freq (New: Math Prior)": {
+        "enabled": True,
         "use_freq": True,  
         "fusion_type": "gated",  
-        "use_ordinal": True
+        "use_ordinal": False,
+        "freq_type": "math_prior" # 调用新的 HighFreqLesionBranch
+    },
+    # 实验组 2：完全体（数学先验 + 序数回归联合损失）
+    "Final (Math Prior + Ordinal Loss)": {
+        "enabled": True, 
+        "use_freq": True,  
+        "fusion_type": "gated",  
+        "use_ordinal": True,
+        "freq_type": "math_prior"
     }
 }

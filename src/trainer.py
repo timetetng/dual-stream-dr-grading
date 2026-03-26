@@ -39,7 +39,8 @@ class AblationTrainer:
             num_classes=5, 
             embed_dim=512, 
             use_freq=self.config['use_freq'], 
-            fusion_type=self.config['fusion_type']
+            fusion_type=self.config['fusion_type'],
+            freq_type=self.config.get('freq_type', 'magnitude')
         ).to(self.device)
         
         # 2. 初始化损失函数
@@ -128,7 +129,8 @@ class AblationTrainer:
         )
         self.progress.remove_task(test_task)
         
-        test_recall, test_spec, test_f1, test_auc = calculate_medical_metrics(test_labels, test_preds, test_probs)
+        # 接收新加入的准确率
+        test_recall, test_spec, test_f1, test_auc, test_acc = calculate_medical_metrics(test_labels, test_preds, test_probs)
         
         # 6. 保存报告
         safe_exp_name = self.exp_name.replace(' ', '_').replace('+', '').replace('(', '').replace(')', '')
@@ -141,6 +143,7 @@ class AblationTrainer:
         
         return {
             "Model Variant": self.exp_name, 
+            "Accuracy": test_acc, 
             "Val QWK": best_val_qwk, 
             "Test QWK": test_qwk,
             "Recall": test_recall,
