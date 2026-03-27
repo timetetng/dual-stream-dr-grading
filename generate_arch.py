@@ -1,59 +1,40 @@
-import os
-import torch
-import traceback
-from torchview import draw_graph
-from rich.console import Console
+from diagrams import Diagram, Cluster
+from diagrams.custom import Custom
+from diagrams.programming.framework import Fastapi # 仅用作占位图标示例
 
-# 直接导入你项目中真实的完全体双流网络
-from src.models.fusion import DualStreamNet
-
-console = Console()
-
-def generate_real_architecture_diagram():
-    console.print("\n[bold cyan]>>> 正在解析工程代码，生成真实双流网络架构图...[/bold cyan]")
+with Diagram("双流网络架构图 (Dual Stream Net)", show=False, direction="TB"):
     
-    save_dir = "outputs/reports/figures"
-    os.makedirs(save_dir, exist_ok=True)
-    filename = "aptos_dual_stream_arch"
-    save_path = os.path.join(save_dir, filename)
+    input_img = Custom("输入眼底图像", "./retina_icon.png") # 可以指定本地图标
+    
+    with Cluster("空域分支 (Spatial Branch)"):
+        resnet = Custom("ResNet50 Backbone", "./cnn_icon.png")
+        pool_s = Custom("AdaptiveConcatPool2d", "./pool_icon.png")
+        proj_s = Custom("Projector", "./linear_icon.png")
+        feat_s = Custom("空间特征 feat_spatial", "./tensor_icon.png")
+        
+        resnet >> pool_s >> proj_s >> feat_s
+        
+    with Cluster("频域分支 (HighFreq Lesion Branch)"):
+        math_prior = Custom("apply_math_filter", "./fft_icon.png")
+        cnn_f = Custom("Lightweight CNN", "./cnn_icon.png")
+        pool_f = Custom("AdaptiveAvgPool2d", "./pool_icon.png")
+        feat_f = Custom("频域特征 feat_freq", "./tensor_icon.png")
+        
+        math_prior >> cnn_f >> pool_f >> feat_f
+        
+    with Cluster("特征融合模块 (Dynamic Gated Fusion)"):
+        concat = Custom("特征拼接 (Cat)", "./cat_icon.png")
+        weighted_sum = Custom("加权求和", "./sum_icon.png")
+        fused_feat = Custom("融合特征 fused_feat", "./tensor_icon.png")
+        
+        [feat_s, feat_f] >> concat
+        concat >> weighted_sum
+        [feat_s, feat_f] >> weighted_sum >> fused_feat
 
-    model = DualStreamNet(
-        num_classes=5, 
-        embed_dim=512, 
-        use_freq=True, 
-        fusion_type='gated', 
-        freq_type='math_prior'
-    )
-    model.eval()
-
-    try:
-        # 1. save_graph=False 避免 torchview 内部吞掉真实的报错信息
-        # 2. depth=2 是画 ResNet 类网络最完美的深度，既有结构又不至于让渲染引擎崩溃
-        model_graph = draw_graph(
-            model, 
-            input_size=(1, 3, 384, 384),
-            graph_name=filename,
-            depth=2,  
-            expand_nested=True,
-            show_shapes=True,
-            show_dtypes=False,
-            save_graph=False 
-        )
-        
-        # 我们手动调用 graphviz 的 render 方法，以便暴露真实的底层报错
-        console.print("[dim]正在调用 Graphviz 引擎渲染 PDF...[/dim]")
-        model_graph.visual_graph.render(save_path, format="pdf", cleanup=True)
-        
-        console.print("[dim]正在调用 Graphviz 引擎渲染 PNG...[/dim]")
-        model_graph.visual_graph.render(save_path, format="png", cleanup=True)
-        
-        console.print(f"[bold green]架构图生成成功！[/bold green]")
-        console.print(f"  - 论文高清矢量图: {save_path}.pdf")
-        console.print(f"  - 快速预览图:     {save_path}.png")
-        
-    except Exception as e:
-        console.print("[bold red]生成失败！真实的底层报错信息如下：[/bold red]")
-        traceback.print_exc()
-
-if __name__ == "__main__":
-    generate_real_architecture_diagram()
+    classifier = Custom("线性分类器", "./linear_icon.png")
+    output = Custom("输出 DR 分级", "./output_icon.png")
+    
+    input_img >> resnet
+    input_img >> math_prior
+    
+    fused_feat >> classifier >> output

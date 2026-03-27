@@ -1,5 +1,4 @@
 # configs/config.py
-import os
 
 class BaseConfig:
     """全局基础超参数配置"""
@@ -14,12 +13,12 @@ class BaseConfig:
     IMG_DIR = 'data/processed/train_images'
     OUTPUT_DIR = 'outputs'
     
-    LR_PRETRAINED = 4.57e-5 # 迁移模型学习率
-    LR_NEW = 1.92e-5 # 新层学习率
-    WEIGHT_DECAY = 2.96e-5 # 遗忘惩罚
-    ORDINAL_ALPHA = 0.1 # 序数回归 SmoothL1 正则化惩罚系数
+    LR_PRETRAINED = 4.29e-5 # 迁移模型学习率
+    LR_NEW = 2.3e-4 # 新层学习率
+    WEIGHT_DECAY = 8.43e-4 # 遗忘惩罚
+    ORDINAL_ALPHA = 0.361 # 序数回归 SmoothL1 正则化惩罚系数
 
-# 消融实验矩阵：论证数学先验的优越性
+# 消融实验矩阵
 EXPERIMENTS = {
     # 对照组 1：只有传统的空间图（基线）
     "Baseline (Spatial Only)": {
@@ -29,7 +28,7 @@ EXPERIMENTS = {
         "use_ordinal": False,
         "freq_type": "magnitude"
     },
-    # 对照组 2：加入普通幅度谱分支（证明盲目扔频谱图效果有限）
+    # 对照组 2：加入普通幅度谱分支
     "+ Freq (Old: Magnitude)": {
         "enabled": True,
         "use_freq": True,  
@@ -37,7 +36,7 @@ EXPERIMENTS = {
         "use_ordinal": False,
         "freq_type": "magnitude" # 调用旧的 FrequencyBranch
     },
-    # 实验组 1：换用数学先验病灶感知分支（证明数学特征的优势）
+    # 实验组 1：换用数学先验病灶感知分支
     "+ Freq (New: Math Prior)": {
         "enabled": True,
         "use_freq": True,  
