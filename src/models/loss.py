@@ -41,11 +41,11 @@ class JointOrdinalLoss(nn.Module):
     改进的序数回归与多分类联合损失函数
     使用 SmoothL1Loss 替换 MSE，提高训练稳定性并防止梯度爆炸
     """
-    def __init__(self, alpha=0.1):  # 修改：将默认惩罚系数调低至 0.1
+    def __init__(self, alpha=0.1):
         super(JointOrdinalLoss, self).__init__()
         self.alpha = alpha
         self.ce_loss = nn.CrossEntropyLoss()
-        self.mse_loss = nn.SmoothL1Loss()  # 修改：使用平滑 L1 损失
+        self.mse_loss = nn.SmoothL1Loss()  # 使用平滑 L1 损失
 
     def forward(self, outputs, targets):
         # 1. 标准分类损失

@@ -11,7 +11,7 @@ from sklearn.metrics import (
     recall_score, 
     f1_score, 
     roc_auc_score,
-    accuracy_score  # 新增：导入准确率计算函数
+    accuracy_score
 )
 
 def calculate_qwk(y_true, y_pred):
@@ -25,7 +25,7 @@ def calculate_medical_metrics(y_true, y_pred, y_probs=None, num_classes=5):
     """
     labels = list(range(num_classes))
     
-    # 1. 整体准确率 (Accuracy) - 迎合常规论文的展示指标
+    # 1. 整体准确率 (Accuracy)
     accuracy = accuracy_score(y_true, y_pred)
     
     # 2. 召回率 (敏感度 Sensitivity) 和 F1 Score (Macro)

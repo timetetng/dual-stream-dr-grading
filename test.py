@@ -80,7 +80,5 @@ def visualize_radii(img_path, save_path="fft_radius_comparison.png"):
     plt.close()
 
 if __name__ == "__main__":
-    # 请将此处替换为你 data/processed/train_images/ 中的某张患病图像路径
-    # 建议挑选一张包含较多"棉絮斑(软性渗出)"或"大片出血"的 3 级或 4 级样本
     SAMPLE_IMG_PATH = "data/processed/train_images/0a1076183736.png" 
     visualize_radii(SAMPLE_IMG_PATH)

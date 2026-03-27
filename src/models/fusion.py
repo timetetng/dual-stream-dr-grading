@@ -3,29 +3,80 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 
+class AdaptiveConcatPool2d(nn.Module):
+    """
+    混合池化层：将全局最大池化和全局平均池化的结果在通道维度拼接。
+    对于 DR 任务，最大池化抓取突变病灶（如出血点），平均池化保留整体视网膜背景信息。
+    """
+    def __init__(self, sz=(1, 1)):
+        super(AdaptiveConcatPool2d, self).__init__()
+        self.ap = nn.AdaptiveAvgPool2d(sz)
+        self.mp = nn.AdaptiveMaxPool2d(sz)
+        
+    def forward(self, x):
+        return torch.cat([self.mp(x), self.ap(x)], dim=1)
+
+# 空域分支，尝试加上多层混合池化
 class SpatialBranch(nn.Module):
     def __init__(self, embed_dim=512):
         super(SpatialBranch, self).__init__()
-        weights = models.ResNet50_Weights.IMAGENET1K_V1
+        # 使用泛化性能更强的 V2 预训练权重
+        weights = models.ResNet50_Weights.IMAGENET1K_V2
         resnet = models.resnet50(weights=weights)
-        self.features = nn.Sequential(*list(resnet.children())[:-1])
-        self.num_ftrs = resnet.fc.in_features
         
+        # 将 ResNet50 拆解，以便后续提取多尺度特征
+        self.stem = nn.Sequential(
+            resnet.conv1, resnet.bn1, resnet.relu, resnet.maxpool
+        )
+        self.layer1 = resnet.layer1
+        self.layer2 = resnet.layer2
+        self.layer3 = resnet.layer3  # Layer3 输出通道数为 1024
+        self.layer4 = resnet.layer4  # Layer4 输出通道数为 2048
+        
+        # 使用混合池化，注意这会使原本的通道数翻倍
+        self.pool = AdaptiveConcatPool2d((1, 1))
+        
+        # 计算融合后的总通道数：
+        # Layer3: 1024 通道 -> ConcatPool -> 2048
+        # Layer4: 2048 通道 -> ConcatPool -> 4096
+        # 拼接后总和: 2048 + 4096 = 6144
+        self.num_ftrs = 6144
+        
+        # 优化后的投影头，采用两层结构和 SiLU 激活函数以实现更好的非线性降维
         self.projector = nn.Sequential(
-            nn.Linear(self.num_ftrs, embed_dim),
+            nn.Linear(self.num_ftrs, 1024),
+            nn.BatchNorm1d(1024),
+            nn.SiLU(inplace=True),
+            nn.Dropout(p=0.4),  # 特征维度变大，适当增加 Dropout 防止过拟合
+            nn.Linear(1024, embed_dim),
             nn.BatchNorm1d(embed_dim),
-            nn.ReLU(inplace=True),
-            nn.Dropout(p=0.3)
+            nn.SiLU(inplace=True)
         )
 
     def forward(self, x):
-        x = self.features(x)
-        x = torch.flatten(x, 1)
-        feat = self.projector(x)
+        # 前置基础特征提取
+        x = self.stem(x)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        
+        # 提取多尺度特征
+        feat3 = self.layer3(x)      # (Batch, 1024, H/16, W/16)
+        feat4 = self.layer4(feat3)  # (Batch, 2048, H/32, W/32)
+        
+        # 分别进行混合池化并展平
+        p3 = torch.flatten(self.pool(feat3), 1)  # (Batch, 2048)
+        p4 = torch.flatten(self.pool(feat4), 1)  # (Batch, 4096)
+        
+        # 在通道维度拼接多尺度特征
+        concat_feat = torch.cat([p3, p4], dim=1) # (Batch, 6144)
+        
+        # 降维映射到目标 embed_dim
+        feat = self.projector(concat_feat)
+        
         return feat
 
 # =================================================================
-# 旧架构：直接吃进对数幅度谱 (完全保留你原来的逻辑，用于 Baseline 对比)
+# 旧架构：直接吃进对数幅度谱 
 # =================================================================
 class FrequencyBranch(nn.Module):
     def __init__(self, in_channels=3, base_filters=64, embed_dim=512):
@@ -68,7 +119,7 @@ class FrequencyBranch(nn.Module):
         return feat
 
 # =================================================================
-# 新架构：数学先验驱动的病灶感知分支 (Math-Prior Driven)
+# 新架构：数学先验驱动的病灶感知分支 
 # =================================================================
 class HighFreqLesionBranch(nn.Module):
     def __init__(self, in_channels=1, base_filters=64, embed_dim=512, radius=10):
@@ -109,7 +160,7 @@ class HighFreqLesionBranch(nn.Module):
         fft_x = torch.fft.fft2(x_gray, dim=(-2, -1))
         fft_shift = torch.fft.fftshift(fft_x, dim=(-2, -1))
 
-        # 动态生成高斯掩膜 (无需反向传播)
+        # 动态生成高斯掩膜
         y = torch.arange(H, device=x.device).view(-1, 1) - H // 2
         x_coord = torch.arange(W, device=x.device).view(1, -1) - W // 2
         d_sq = x_coord**2 + y**2 
@@ -172,7 +223,7 @@ class DualStreamNet(nn.Module):
         super(DualStreamNet, self).__init__()
         self.use_freq = use_freq
         self.fusion_type = fusion_type
-        self.freq_type = freq_type # 新增：用于决定实例化哪种频域分支
+        self.freq_type = freq_type
         
         self.spatial_branch = SpatialBranch(embed_dim=embed_dim)
         

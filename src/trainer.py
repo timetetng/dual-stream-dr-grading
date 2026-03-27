@@ -74,7 +74,7 @@ class AblationTrainer:
         weight_filename = "best_dual_stream_ordinal.pth" if self.config['use_ordinal'] else f"best_{self.exp_name.replace(' ', '_')[:10]}.pth"
         weights_path = os.path.join(self.output_dir, "weights", weight_filename)
 
-        # ================= 核心进度条联动计算逻辑 =================
+        # ================= 核心进度条计算逻辑 =================
         steps_per_epoch = len(self.train_loader) + len(self.val_loader)
         advance_epoch_step = 1.0 / steps_per_epoch
         advance_overall_step = 1.0 / (self.num_epochs * steps_per_epoch)
