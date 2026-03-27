@@ -230,7 +230,7 @@ class DualStreamNet(nn.Module):
         if self.use_freq:
             # 动态选择频域分支
             if self.freq_type == 'math_prior':
-                self.freq_branch = HighFreqLesionBranch(embed_dim=embed_dim, radius=40)
+                self.freq_branch = HighFreqLesionBranch(embed_dim=embed_dim, radius=10)
             else:
                 self.freq_branch = FrequencyBranch(embed_dim=embed_dim)
                 

@@ -34,7 +34,7 @@ def objective(trial):
     # 2. 初始化模型与组件
     model = DualStreamNet(
         num_classes=5, 
-        embed_dim=512, 
+        embed_dim=512,
         use_freq=True, 
         fusion_type='gated',
         freq_type='math_prior'

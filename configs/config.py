@@ -22,7 +22,7 @@ class BaseConfig:
 EXPERIMENTS = {
     # 对照组 1：只有传统的空间图（基线）
     "Baseline (Spatial Only)": {
-        "enabled": True,
+        "enabled": False,
         "use_freq": False, 
         "fusion_type": "concat", 
         "use_ordinal": False,
@@ -30,7 +30,7 @@ EXPERIMENTS = {
     },
     # 对照组 2：加入普通幅度谱分支
     "+ Freq (Old: Magnitude)": {
-        "enabled": True,
+        "enabled": False,
         "use_freq": True,  
         "fusion_type": "gated",  
         "use_ordinal": False,
@@ -38,7 +38,7 @@ EXPERIMENTS = {
     },
     # 实验组 1：换用数学先验病灶感知分支
     "+ Freq (New: Math Prior)": {
-        "enabled": True,
+        "enabled": False,
         "use_freq": True,  
         "fusion_type": "gated",  
         "use_ordinal": False,
@@ -46,7 +46,7 @@ EXPERIMENTS = {
     },
     # 对照组 3 ：原来的序数回归
     "+ Freq (Magnitude + Ordinal loss)": {
-        "enabled": True,
+        "enabled": False,
         "use_freq": True,  
         "fusion_type": "gated",  
         "use_ordinal": True,
