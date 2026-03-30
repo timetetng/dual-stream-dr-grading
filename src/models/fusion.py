@@ -122,9 +122,12 @@ class FrequencyBranch(nn.Module):
 # 新架构：数学先验驱动的病灶感知分支 
 # =================================================================
 class HighFreqLesionBranch(nn.Module):
-    def __init__(self, in_channels=1, base_filters=64, embed_dim=512, radius=10):
+    def __init__(self, in_channels=1, base_filters=64, embed_dim=512, init_radius=40.0):
         super(HighFreqLesionBranch, self).__init__()
-        self.radius = radius
+        
+        # 【核心修改 1】：将 radius 注册为可学习的 Parameter
+        self.radius = nn.Parameter(torch.tensor(float(init_radius)))
+        
         # 由于 iFFT 得到的是单通道物理残差图，这里的 in_channels 是 1
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, base_filters, kernel_size=3, stride=2, padding=1),
@@ -149,8 +152,8 @@ class HighFreqLesionBranch(nn.Module):
         )
 
     def apply_math_filter(self, x):
-        """数学计算层：GPU 实时处理 FFT -> 高斯高通滤波 -> iFFT"""
-        # 转灰度，剥离颜色干扰，只看物理结构突变
+        """数学计算层：GPU 实时处理 FFT -> 可学习高斯高通滤波 -> iFFT"""
+        # 转灰度，剥离颜色干扰
         if x.size(1) == 3:
             x_gray = 0.299 * x[:, 0:1, :, :] + 0.587 * x[:, 1:2, :, :] + 0.114 * x[:, 2:3, :, :]
         else:
@@ -164,7 +167,10 @@ class HighFreqLesionBranch(nn.Module):
         y = torch.arange(H, device=x.device).view(-1, 1) - H // 2
         x_coord = torch.arange(W, device=x.device).view(1, -1) - W // 2
         d_sq = x_coord**2 + y**2 
-        mask = 1.0 - torch.exp(-d_sq / (2 * self.radius**2))
+        
+        # 确保 radius 始终为正，防止除以0
+        actual_radius = torch.abs(self.radius) + 1e-6 
+        mask = 1.0 - torch.exp(-d_sq / (2 * actual_radius**2))
         mask = mask.view(1, 1, H, W).to(fft_shift.dtype)
 
         fshift_hpf = fft_shift * mask
@@ -178,8 +184,8 @@ class HighFreqLesionBranch(nn.Module):
         return img_back_hpf
 
     def forward(self, x):
-        with torch.no_grad(): # 滤波过程是纯数学运算，不计算梯度
-            high_freq_map = self.apply_math_filter(x)
+        # 【核心修改 2】：移除 torch.no_grad()，让 FFT 滤波过程的梯度能够回传到 self.radius
+        high_freq_map = self.apply_math_filter(x)
             
         x = self.features(high_freq_map)
         x = torch.flatten(x, 1)
@@ -219,7 +225,7 @@ class ConcatFusion(nn.Module):
         return fused_feat, None, None
 
 class DualStreamNet(nn.Module):
-    def __init__(self, num_classes=5, embed_dim=512, use_freq=True, fusion_type='gated', freq_type='math_prior'):
+    def __init__(self, num_classes=5, embed_dim=512, use_freq=True, fusion_type='gated', freq_type='math_prior', init_radius=40.0):
         super(DualStreamNet, self).__init__()
         self.use_freq = use_freq
         self.fusion_type = fusion_type
@@ -228,9 +234,9 @@ class DualStreamNet(nn.Module):
         self.spatial_branch = SpatialBranch(embed_dim=embed_dim)
         
         if self.use_freq:
-            # 动态选择频域分支
             if self.freq_type == 'math_prior':
-                self.freq_branch = HighFreqLesionBranch(embed_dim=embed_dim, radius=10)
+                # 【核心修改 3】：接收并传递 init_radius 参数
+                self.freq_branch = HighFreqLesionBranch(embed_dim=embed_dim, init_radius=init_radius)
             else:
                 self.freq_branch = FrequencyBranch(embed_dim=embed_dim)
                 
